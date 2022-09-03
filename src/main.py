@@ -8,6 +8,10 @@ from datetime import datetime, date
 from datetime import timedelta
 import requests
 from time import *
+import threading
+from tqdm import *
+
+list_ok = []
 
 def get_all_stock():
     ts.set_token('922a7a740724a061000a97e2b985284fff15ae7e701a53f580d9c1d7')
@@ -21,7 +25,7 @@ def get_week_kline(code, start='20200101', end=''):
     url = url_mode%(code, start, end)
     resp = requests.get(url)
     if resp.status_code != 200:
-        print("Failed to get daily. Error code: %s" % resp.status_code)
+        # tqdm.write("Failed to get daily. Error code: %s" % resp.status_code)
         return
 
     data = json.loads(resp.text)
@@ -52,20 +56,49 @@ def check_week_kline(code, start, end):
     return check_down_times(df, 8)
 
 
+class my_thread(threading.Thread):
+    def __init__(self, threadId, df, begin, end):
+        threading.Thread.__init__(self)
+        self.threadId = threadId
+        self.df = df
+        self.begin = begin
+        self.end = end
+
+    def run(self):
+        stocks = self.df
+        with tqdm(total=len(stocks), leave=False) as pbar:
+            for code, name, index in zip(stocks.ts_code, stocks.name, range(len(stocks))):
+                if check_week_kline(code[0:6], begin, end):
+                    list_ok.append("{}-{}".format(name, code))
+
+                pbar.update(1)
+                pbar.set_description("{:\u3000>4}".format(name))
+        
+            pbar.close()
+
 if __name__ == "__main__":
     starttime = time()
 
     end = date.today().strftime('%Y%m%d')
     begin = (date.today() - timedelta(days=70)).strftime('%Y%m%d')
     all_stock = get_all_stock()
-    for code, name, index in zip(all_stock.ts_code, all_stock.name, range(len(all_stock))):
-        print('\r', end='')
-        print('\033[0J', end='')  # erase from cursor to end
-        print(index, "分析股票中：", name, "-", code, end='')
-        if check_week_kline(code[0:6], begin, end):
-            print('\r', end='')
-            print('\033[0J', end='')  # erase from cursor to end
-            print(name, "-", code)
 
+
+    thread_lst = []
+    thread_num = len(all_stock)//1000 + 1
+    for index in range(0, thread_num):
+        bIndex = index * 1000
+        eIndex = bIndex + 1000
+        if eIndex > len(all_stock) - 1:
+            eIndex = len(all_stock) - 1
+        thread = my_thread(0, all_stock.iloc[bIndex: eIndex], begin, end)
+        thread.start()
+        thread_lst.append(thread)
+
+    for index in range(0, thread_num):
+        thread_lst[index].join()
+    
     endtime = time()
-    print("运行时:", endtime - starttime)
+    print("运行耗时:", endtime - starttime)
+    for obj in list_ok:
+        print(obj)
